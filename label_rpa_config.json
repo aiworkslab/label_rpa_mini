@@ -1,0 +1,15 @@
+{
+  "label_position": {
+    "x": 335,
+    "y": 259
+  },
+  "input_position": {
+    "x": 699,
+    "y": 366
+  },
+  "offset": {
+    "offset_x": 364,
+    "offset_y": 107
+  },
+  "test_text": "test input"
+}
