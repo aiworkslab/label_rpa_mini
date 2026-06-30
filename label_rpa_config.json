@@ -1,15 +1,16 @@
 {
+  "label_name": "得意先コード",
   "label_position": {
-    "x": 335,
-    "y": 259
+    "x": 380,
+    "y": 745
   },
   "input_position": {
-    "x": 699,
-    "y": 366
+    "x": 477,
+    "y": 745
   },
   "offset": {
-    "offset_x": 364,
-    "offset_y": 107
+    "offset_x": 97,
+    "offset_y": 0
   },
   "test_text": "test input"
 }

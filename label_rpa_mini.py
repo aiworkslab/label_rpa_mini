@@ -26,6 +26,9 @@ MOUSEEVENTF_LEFTUP = 0x0004
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 
+# ULONG_PTRはctypes.wintypesに無い環境があるため、同じポインタサイズのWPARAMで代用します。
+ULONG_PTR = ctypes.wintypes.WPARAM
+
 
 class POINT(ctypes.Structure):
     """Windows APIから受け取るマウス座標の入れ物です。"""
@@ -44,7 +47,7 @@ class MSLLHOOKSTRUCT(ctypes.Structure):
         ("mouseData", ctypes.c_ulong),
         ("flags", ctypes.c_ulong),
         ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ULONG_PTR),
     ]
 
 
@@ -57,7 +60,7 @@ class MOUSEINPUT(ctypes.Structure):
         ("mouseData", ctypes.c_ulong),
         ("dwFlags", ctypes.c_ulong),
         ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ULONG_PTR),
     ]
 
 
@@ -69,7 +72,7 @@ class KEYBDINPUT(ctypes.Structure):
         ("wScan", ctypes.c_ushort),
         ("dwFlags", ctypes.c_ulong),
         ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ULONG_PTR),
     ]
 
 
@@ -89,12 +92,72 @@ class INPUT(ctypes.Structure):
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
+
+# 64bit Windowsでもポインタサイズの戻り値を正しく扱うための型です。
+LRESULT = ctypes.c_ssize_t
+
 LowLevelMouseProc = ctypes.WINFUNCTYPE(
-    ctypes.c_long,
+    LRESULT,
     ctypes.c_int,
     ctypes.wintypes.WPARAM,
     ctypes.wintypes.LPARAM,
 )
+
+# ctypesの既定値はint扱いになりやすいため、Windows APIの型を明示します。
+# 特にCallNextHookExのLPARAMは64bitで値が大きくなることがあるため重要です。
+kernel32.GetCurrentThreadId.argtypes = []
+kernel32.GetCurrentThreadId.restype = ctypes.wintypes.DWORD
+
+user32.SetWindowsHookExW.argtypes = [
+    ctypes.c_int,
+    LowLevelMouseProc,
+    ctypes.wintypes.HINSTANCE,
+    ctypes.wintypes.DWORD,
+]
+user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+
+user32.CallNextHookEx.argtypes = [
+    ctypes.wintypes.HHOOK,
+    ctypes.c_int,
+    ctypes.wintypes.WPARAM,
+    ctypes.wintypes.LPARAM,
+]
+user32.CallNextHookEx.restype = LRESULT
+
+user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HHOOK]
+user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
+
+user32.PostThreadMessageW.argtypes = [
+    ctypes.wintypes.DWORD,
+    ctypes.wintypes.UINT,
+    ctypes.wintypes.WPARAM,
+    ctypes.wintypes.LPARAM,
+]
+user32.PostThreadMessageW.restype = ctypes.wintypes.BOOL
+
+user32.GetMessageW.argtypes = [
+    ctypes.POINTER(ctypes.wintypes.MSG),
+    ctypes.wintypes.HWND,
+    ctypes.wintypes.UINT,
+    ctypes.wintypes.UINT,
+]
+user32.GetMessageW.restype = ctypes.wintypes.BOOL
+
+user32.TranslateMessage.argtypes = [ctypes.POINTER(ctypes.wintypes.MSG)]
+user32.TranslateMessage.restype = ctypes.wintypes.BOOL
+
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(ctypes.wintypes.MSG)]
+user32.DispatchMessageW.restype = LRESULT
+
+user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.SetCursorPos.restype = ctypes.wintypes.BOOL
+
+user32.SendInput.argtypes = [
+    ctypes.wintypes.UINT,
+    ctypes.POINTER(INPUT),
+    ctypes.c_int,
+]
+user32.SendInput.restype = ctypes.wintypes.UINT
 
 
 class ClickCapture:
@@ -150,7 +213,7 @@ class LabelRpaApp(tk.Tk):
         super().__init__()
 
         self.title("ラベルRPAミニ")
-        self.geometry("460x330")
+        self.geometry("460x370")
         self.resizable(False, False)
 
         self.label_pos = None
@@ -158,6 +221,7 @@ class LabelRpaApp(tk.Tk):
         self.capture = None
 
         self.status_var = tk.StringVar(value="ボタンを押して、画面上の位置をクリックしてください。")
+        self.label_name_var = tk.StringVar(value="")
         self.label_var = tk.StringVar(value="ラベル座標: 未取得")
         self.input_var = tk.StringVar(value="入力欄座標: 未取得")
         self.offset_var = tk.StringVar(value="offset_x / offset_y: 未計算")
@@ -175,6 +239,13 @@ class LabelRpaApp(tk.Tk):
 
         title = tk.Label(main, text="クリック位置の関係を保存する簡易RPA", font=("Yu Gothic UI", 13, "bold"))
         title.pack(anchor="w", pady=(0, 14))
+
+        # ラベル名はJSONに保存し、起動時に前回の内容を表示します。
+        label_name_frame = tk.Frame(main)
+        label_name_frame.pack(fill="x", pady=(0, 12))
+
+        tk.Label(label_name_frame, text="ラベル名", width=10, anchor="w").pack(side="left")
+        tk.Entry(label_name_frame, textvariable=self.label_name_var).pack(side="left", fill="x", expand=True)
 
         button_frame = tk.Frame(main)
         button_frame.pack(fill="x", pady=(0, 12))
@@ -298,6 +369,7 @@ class LabelRpaApp(tk.Tk):
             }
 
         return {
+            "label_name": self.label_name_var.get(),
             "label_position": self.label_pos,
             "input_position": self.input_pos,
             "offset": offset,
@@ -324,6 +396,8 @@ class LabelRpaApp(tk.Tk):
 
         self.label_pos = data.get("label_position")
         self.input_pos = data.get("input_position")
+        # 古いJSONにlabel_nameが無い場合は空文字として読み込みます。
+        self.label_name_var.set(data.get("label_name", ""))
 
     def _reload_config(self):
         self._load_config()
@@ -354,14 +428,14 @@ class LabelRpaApp(tk.Tk):
     def _send_mouse_click(self):
         down = INPUT(
             type=INPUT_MOUSE,
-            union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None)),
+            union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0)),
         )
         up = INPUT(
             type=INPUT_MOUSE,
-            union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, None)),
+            union=INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0)),
         )
         inputs = (INPUT * 2)(down, up)
-        user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
 
     def _send_text(self, text):
         # Unicode入力なので、日本語などにも応用しやすい方式です。
@@ -369,14 +443,14 @@ class LabelRpaApp(tk.Tk):
             code = ord(char)
             key_down = INPUT(
                 type=INPUT_KEYBOARD,
-                union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, None)),
+                union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, 0)),
             )
             key_up = INPUT(
                 type=INPUT_KEYBOARD,
-                union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, None)),
+                union=INPUT_UNION(ki=KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, 0)),
             )
             inputs = (INPUT * 2)(key_down, key_up)
-            user32.SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+            user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
 
     def _on_close(self):
         if self.capture:
