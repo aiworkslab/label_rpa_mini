@@ -360,7 +360,7 @@ class LabelRpaApp(tk.Tk):
         else:
             self.offset_var.set("offset_x / offset_y: 未計算")
 
-    def _build_config_data(self):
+    def _build_config_item(self):
         offset = None
         if self.label_pos and self.input_pos:
             offset = {
@@ -374,6 +374,14 @@ class LabelRpaApp(tk.Tk):
             "input_position": self.input_pos,
             "offset": offset,
             "test_text": TEST_TEXT,
+        }
+
+    def _build_config_data(self):
+        # 今後の複数ラベル対応に備えて、設定はitems配列の1件として保存します。
+        return {
+            "items": [
+                self._build_config_item(),
+            ],
         }
 
     def _save_config(self, show_message=True):
@@ -393,6 +401,12 @@ class LabelRpaApp(tk.Tk):
         except json.JSONDecodeError:
             messagebox.showwarning("読み込み失敗", "JSON設定ファイルの形式が正しくありません。")
             return
+
+        # 新形式はitems配列です。まだ画面は1件だけ扱うため、先頭の設定を読み込みます。
+        items = data.get("items")
+        if isinstance(items, list) and items:
+            data = items[0]
+        # 古いJSON形式は直下にlabel_positionなどがあるため、そのまま読み込みます。
 
         self.label_pos = data.get("label_position")
         self.input_pos = data.get("input_position")
