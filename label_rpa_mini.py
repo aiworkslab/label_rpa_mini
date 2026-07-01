@@ -213,12 +213,13 @@ class LabelRpaApp(tk.Tk):
         super().__init__()
 
         self.title("ラベルRPAミニ")
-        self.geometry("460x370")
+        self.geometry("460x500")
         self.resizable(False, False)
 
         self.label_pos = None
         self.input_pos = None
         self.capture = None
+        self.config_items = []
 
         self.status_var = tk.StringVar(value="ボタンを押して、画面上の位置をクリックしてください。")
         self.label_name_var = tk.StringVar(value="")
@@ -229,6 +230,7 @@ class LabelRpaApp(tk.Tk):
         self._load_config()
         self._build_ui()
         self._refresh_labels()
+        self._refresh_registered_labels()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -286,6 +288,19 @@ class LabelRpaApp(tk.Tk):
 
         tk.Button(save_frame, text="JSONに保存", command=self._save_config, width=18).pack(side="left")
         tk.Button(save_frame, text="設定を再読み込み", command=self._reload_config, width=18).pack(side="left", padx=8)
+
+        registered_frame = tk.LabelFrame(main, text="登録済みラベル", padx=12, pady=10)
+        registered_frame.pack(fill="x", pady=(0, 12))
+
+        # 設定ファイル内のitems配列を確認するための読み取り専用一覧です。
+        self.registered_list_var = tk.StringVar(value="")
+        tk.Label(
+            registered_frame,
+            textvariable=self.registered_list_var,
+            anchor="w",
+            justify="left",
+            wraplength=400,
+        ).pack(fill="x")
 
         status_box = tk.Label(
             main,
@@ -378,15 +393,20 @@ class LabelRpaApp(tk.Tk):
 
     def _build_config_data(self):
         # 今後の複数ラベル対応に備えて、設定はitems配列の1件として保存します。
+        # 画面ではまだ1件だけ編集するため、先頭だけ現在の入力内容で更新します。
+        items = [self._build_config_item()]
+        if len(self.config_items) > 1:
+            items.extend(self.config_items[1:])
+
         return {
-            "items": [
-                self._build_config_item(),
-            ],
+            "items": items,
         }
 
     def _save_config(self, show_message=True):
         data = self._build_config_data()
         CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.config_items = data["items"]
+        self._refresh_registered_labels()
 
         if show_message:
             self.status_var.set(f"設定を保存しました: {CONFIG_FILE}")
@@ -405,7 +425,13 @@ class LabelRpaApp(tk.Tk):
         # 新形式はitems配列です。まだ画面は1件だけ扱うため、先頭の設定を読み込みます。
         items = data.get("items")
         if isinstance(items, list) and items:
+            self.config_items = items
             data = items[0]
+        elif isinstance(items, list):
+            self.config_items = []
+            data = {}
+        else:
+            self.config_items = [data]
         # 古いJSON形式は直下にlabel_positionなどがあるため、そのまま読み込みます。
 
         self.label_pos = data.get("label_position")
@@ -416,7 +442,25 @@ class LabelRpaApp(tk.Tk):
     def _reload_config(self):
         self._load_config()
         self._refresh_labels()
+        self._refresh_registered_labels()
         self.status_var.set("設定を再読み込みしました。")
+
+    def _refresh_registered_labels(self):
+        if not hasattr(self, "registered_list_var"):
+            return
+
+        if not self.config_items:
+            self.registered_list_var.set("登録されているラベルはありません")
+            return
+
+        # 一覧にはラベル名と入力する内容を表示します。
+        lines = []
+        for index, item in enumerate(self.config_items, start=1):
+            label_name = item.get("label_name") or "名称未設定"
+            test_text = item.get("test_text") or ""
+            lines.append(f"{index}. ラベル名: {label_name} / 入力する内容: {test_text}")
+
+        self.registered_list_var.set("\n".join(lines))
 
     def _test_input(self):
         if not self.input_pos:
